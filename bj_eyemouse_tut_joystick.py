@@ -7,12 +7,11 @@ import win32api
 # constants
 # SCREEN_WIDTH  = 1920
 # SCREEN_HEIGHT = 1080
-# This code is controlling the mouse based on pupil position inside the box of the eye
 SCREEN_WIDTH = win32api.GetSystemMetrics(0)
 SCREEN_HEIGHT = win32api.GetSystemMetrics(1)
 
-MOUSE_SCALE_X = 20
-MOUSE_SCALE_Y = -30
+MOUSE_SCALE_X = 15
+MOUSE_SCALE_Y = 15
 
 # load the webcam
 cam = cv2.VideoCapture(0)
@@ -24,8 +23,12 @@ eyeCascade  = cv2.CascadeClassifier('C:\opencv\data\haarcascades\haarcascade_eye
 # holds the previous center
 lastPoint = [0,0]
 
+# default eye center position
+#defaultEyeCenter = [23, 22]
+#defaultEyeCenter = [0,0]
+
 # holds the location of the mouse
-mousePoint = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2]
+#mousePoint = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2]
 
 def getLeftEye(eyes):
     i = 0
@@ -175,7 +178,42 @@ def getEyeBall(frame, circles):
             smallestIndex = i
 
     return circles[0][smallestIndex]
+    # stores the total pixel sum values for each circle
+    '''
+    sums = np.zeros(len(circles[0]))
+    # print frame
+    # print circles
+    for z in range (len(circles[0])):
+        #print 'ran: ', z , 'times'
+        # loop through the frame's rows
+        for y in range(frame.shape[0]):
+            # loop through that row (length of the row):
+            for x in range(frame.shape[1]):
+                # loop through each circle
+                for i in range(len(circles[0])):
+                    # get the center point of the circle
+                    center = (int(circles[0][z][0]), int(circles[0][z][1]))
+                    radius = int(circles[0][z][2])
 
+                    # checks if the pixel is inside the circle, and
+                    # if so adds it to the total circle values
+                    if (pow(x - center[0], 2) + pow(y - center[1], 2) < pow(radius, 2)):
+                        sums[z] += frame[y][x]
+
+
+        # figure out the smallest sum
+        smallestSum = 9999999
+        smallestIndex = -1
+        for i in range(len(circles[0])):
+            #print 'sums', sums[i]
+            if sums[i] < smallestSum:
+                smallestIndex = i
+                smallestSum = sums[i]
+
+
+    #print 'smallest amt', sums[smallestIndex]
+    return circles[0][smallestIndex]
+    '''
 
 # get the last average X amount of circle locations
 # points is the list of circle points, amount
@@ -201,6 +239,19 @@ clip = np.zeros((512,512,3), np.uint8)
 # holds the past centers of the eyeball, to use for averaging
 centers = []
 
+#center = [0,0]
+
+# mouse speed handling
+mouseAccel = [0,0]
+mouseVel = [0,0]
+
+# holds the location of the mouse
+mousePoint = [SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2]
+
+# how far away from the center the pupil has to be in order to move the mouse
+MOUSE_THRESH_X = 2
+MOUSE_THRESH_Y = 1
+
 while True:
     ret, frame = cam.read()
     frame = cv2.flip(frame,1)
@@ -214,6 +265,10 @@ while True:
 
     # get the rectangles defining the face
     faces = detectFaces(gray, faceCascade)
+
+    # reset mouse acceleration
+    mouseAccel[0] = 0
+    mouseAccel[1] = 0
 
     # iterate through each detected face
     for face in faces:
@@ -248,6 +303,12 @@ while True:
                 eh = eye[3]
                 #cv2.rectangle(face_cropped, (ex,ey), (ex+ew,ey+eh),(0,255,0),2)
 
+                # set the default eye center to be the center of the eye rectangle
+                #defaultEyeCenter[0] = ew / 2
+                #defaultEyeCenter[1] = eh / 2
+
+                #print('Default eye center: ', defaultEyeCenter )
+
                 # draw a rectangle around the found eye
                 cv2.rectangle(frame, (fx+ex,fy+ey), (fx+ex+ew,fy+ey+eh),(0,255,0),2)
 
@@ -269,6 +330,12 @@ while True:
                 # detect circles within the eye crop
                 irises = detectIrises(eye_cropped)
 
+                defaultEyeCenter = [0,0]
+                defaultEyeCenter[0] = fx+cex+(cew/2)
+                defaultEyeCenter[1] = fy+cey+(ceh/2)
+
+                cv2.circle(frame, (defaultEyeCenter[0], defaultEyeCenter[1]), 2, (255, 255, 0), 2)
+
                 # go through each iris
                 if not (irises is None):
                     irises = np.uint16(np.around(irises))
@@ -287,25 +354,69 @@ while True:
                     #print 'eye cropped shape: ', eye_cropped.shape
                     #print eyeball
 
+                    # store the default eye center if it isn't set yet
+                    #if len(defaultEyeCenter) == 0 and not (eyeball is None):
+                    #    defaultEyeCenter.append(  eyeball[0]  )
+                    #    defaultEyeCenter.append(  eyeball[1]  )
+                    #    print('default center: ', defaultEyeCenter)
+
                     # add the current center to the list of centers
                     centers.append((eyeball[0], eyeball[1]))
 
                     # calculate the new average center
                     center = stabilize(centers, 5) # use the past 5 entries
+                    #center = [0,0]
+                    #center[0] = eyeball[0]
+                    #center[1] = eyeball[1]
 
                     # calculate the new mouse position
                     if not (center is None):
                         diff = [0,0]
-                        diff[0] = (center[0] - lastPoint[0]) * MOUSE_SCALE_X
-                        diff[1] = (center[1] - lastPoint[1]) * MOUSE_SCALE_Y
+                        #diff[0] = (center[0] - lastPoint[0]) * MOUSE_SCALE_X
+                        #diff[1] = (center[1] - lastPoint[1]) * MOUSE_SCALE_Y
+                        #diff[0] = center[0] - defaultEyeCenter[0]
+                        #diff[1] = center[1] - defaultEyeCenter[1]
+                        diff[0] = (fx+ex+center[0]) - defaultEyeCenter[0]
+                        diff[1] = (fy+ey+center[1]) - defaultEyeCenter[1]
 
-                        print('Center: ', center)
+                        if diff[0] > MOUSE_THRESH_X:
+                            mouseAccel[0] = 2
+                        elif diff[0] < -1*MOUSE_THRESH_X:
+                            mouseAccel[0] = -2
 
-                        #print 'Diff: ', diff
+                        #if ((fy+ey+center[1]) - defaultCenter[1]) > MOUSE_THRESH:
+                        if diff[1] > MOUSE_THRESH_Y:
+                            mouseAccel[1] = 2
+                        elif diff[1] < -1*MOUSE_THRESH_Y:
+                            mouseAccel[1] = -2
+
+                        #print('Diff: ', diff)
+
+                        # max difference x
+                        #if diff[0] > 5:
+                        #    diff[0] = 5
+                        #elif diff[1] < -5:
+                        #    diff[0] = -5
+
+                        # max difference y
+                        #if diff[1] > 5:
+                        #    diff[1] = 5
+                        #elif diff[1] < -5:
+                        #    diff[1] = -5
+
+                        #print('Center: ', center)
+
+                        print 'Diff: ', diff
 
                         # move the mouse the difference
-                        '''mousePoint[0] += diff[0]
-                        mousePoint[1] += diff[1]
+                        '''if diff[0] > 1:
+                            mousePoint[0] += diff[0] * MOUSE_SCALE_X
+                        elif diff[0] < 0:
+                            mousePoint[0] += diff[0] * MOUSE_SCALE_X
+
+                        if diff[1] > 1 or diff[1] < -1:
+                            mousePoint[1] -= diff[1] * MOUSE_SCALE_Y
+
                         if( mousePoint[0] > SCREEN_WIDTH ):
                             mousePoint[0] = SCREEN_WIDTH
                         elif( mousePoint[0] < 0):
@@ -313,14 +424,15 @@ while True:
                         if (mousePoint[1] > SCREEN_HEIGHT):
                             mousePoint[1] = SCREEN_HEIGHT
                         elif (mousePoint[1] < 0):
-                            mousePoint[1] = 0
-                        '''
+                            mousePoint[1] = 0'''
+
                         # ratio: center_x / eye_width = mouse_x / screen_width
-                        mousePoint[0] = SCREEN_WIDTH * center[0] / ew
+                        #mousePoint[0] = SCREEN_WIDTH * center[0] / ew
                         # ratio: center_y / eye_height = mouse_y / screen_height
-                        mousePoint[1] = SCREEN_HEIGHT * center[1] / eh
+                        #mousePoint[1] = SCREEN_HEIGHT * center[1] / eh
                         #print 'Mousepoint: ', mousePoint
-                        win32api.SetCursorPos((mousePoint[0],mousePoint[1]))
+
+                        #win32api.SetCursorPos((mousePoint[0],mousePoint[1]))
 
                         lastPoint = center
 
@@ -340,12 +452,51 @@ while True:
         # checking cropped image
         #clip = face_cropped
 
+    
+    mouseVel[0] += mouseAccel[0]
+    mouseVel[1] += mouseAccel[1]
+    mousePoint[0] += mouseVel[0]
+    mousePoint[1] += mouseVel[1]
+
+    if (mouseVel[0] > 12):
+        mouseVel[0] = 12
+    elif (mouseVel[0] < -12):
+        mouseVel[0] = -12
+    if (mouseVel[1] > 12):
+        mouseVel[1] = 12
+    elif (mouseVel[1] < -12):
+        mouseVel[1] = -12
+
+    # slow down the mouse if not being accelerated
+    if mouseAccel[0] == 0 and abs(mouseVel[0]) > 0:
+        if mouseVel[0] > 0:
+            mouseVel[0] -= 1
+        else:
+            mouseVel[0] += 1
+
+    if mouseAccel[1] == 0 and abs(mouseVel[1]) > 0:
+        if mouseVel[1] > 0:
+            mouseVel[1] -= 1
+        else:
+            mouseVel[1] += 1
+
+    if (mousePoint[0] > SCREEN_WIDTH):
+        mousePoint[0] = SCREEN_WIDTH
+    elif (mousePoint[0] < 0):
+        mousePoint[0] = 0
+    if (mousePoint[1] > SCREEN_HEIGHT):
+        mousePoint[1] = SCREEN_HEIGHT
+    elif (mousePoint[1] < 0):
+        mousePoint[1] = 0
+
+    win32api.SetCursorPos((mousePoint[0], mousePoint[1]))
+
 
     # show the frame
     cv2.imshow('frame', frame)
     # show the blurred version of the frame
-    frame = cv2.medianBlur(frame, 5)
-    cv2.imshow('frame blurred', frame)
+    #frame = cv2.medianBlur(frame, 5)
+    #cv2.imshow('frame blurred', frame)
     # test what cv2.histogram looks like
     if len(clip.shape) == 2:
         cv2.equalizeHist(clip, clip)

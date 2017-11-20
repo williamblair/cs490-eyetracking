@@ -32,9 +32,6 @@ eyeCascade = cv2.CascadeClassifier('C:\opencv\data\haarcascades\haarcascade_eye_
 # holds the previous center
 lastPoint = [0, 0]
 
-# holds the location of the mouse
-mousePoint = [SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2]
-
 
 def getLeftEye(eyes):
     i = 0
@@ -211,10 +208,20 @@ def stabilize(points, amount):
 clip = np.zeros((512, 512, 3), np.uint8)
 
 # holds the past centers of the eyeball, to use for averaging
-# centers = []
+centers = []
 
 # hold previous mouse points
 mousePoints = []
+
+# mouse speed handling
+mouseAccel = [0,0]
+mouseVel = [0,0]
+
+# holds the location of the mouse
+mousePoint = [SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2]
+
+# how far away from the center the pupil has to be in order to move the mouse
+MOUSE_THRESH = 4
 
 while True:
     ret, frame = cam.read()
@@ -276,10 +283,10 @@ while True:
                 # calculate the middle half of the detected eye square (to
                 # focus on just the eye more)
                 # c stands for cropped
-                cex = ex
-                cey = ey + (eh / 4)
-                cew = ew
-                ceh = 2 * eh / 4
+                #cex = ex
+                #cey = ey + (eh / 4)
+                #cew = ew
+                #ceh = 2 * eh / 4
 
                 # clip out just the eye section
                 eye_cropped = face_cropped[ey:ey + eh, ex:ex + ew]
@@ -306,115 +313,125 @@ while True:
                     # print 'eye cropped shape: ', eye_cropped.shape
                     # print eyeball
                     # add the current center to the list of centers
-                    # centers.append((eyeball[0], eyeball[1]))
+                    centers.append((eyeball[0], eyeball[1]))
                     # calculate the new average center
-                    # center = stabilize(centers, 5) # use the past 5 entries
-                    center = (eyeball[0], eyeball[1])
+                    center = stabilize(centers, 5) # use the past 5 entries
+                    #center = (eyeball[0], eyeball[1])
 
-                    # calculate the new mouse position
-                    if (cv2.waitKey(1) & 0xFF == ord(' ')):
-                        readInput = True
+                    mouseAccel[0] = 0
+                    mouseAccel[1] = 0
 
-                    if (clibrationCorner == 1):
-                        print "Look at the top left corner and press the space bar"
-                    if (readInput == True and clibrationCorner == 1):
-                        topLeft = center
-                        clibrationCorner = 2
-                        readInput = False
-                        print "Look at the bottom right corner and press the space bar"
+                    if not (center is None):
 
-                    if (readInput == True and clibrationCorner == 2):
-                        bottomRight = center
-                        if(bottomRight[0] == topLeft[0]) or (bottomRight[1]==topLeft[1]):
-                            print 'bad calibration, try again'
-                            calibrationMode = 2
-                            readInput = False
-                            break
+                        defaultCenter = [fx + ex + (ew/2), fy + ey + (eh/2)]
+                        cv2.circle(frame, (defaultCenter[0], defaultCenter[1]), 1, [255,255,0], 2)
 
-                        clibrationCorner = 3
-                        readInput = False
+                        print('Center: ', defaultCenter)
+                        print('EyeCenter: ', (fx+ex+center[0], fy+ey+center[1]))
 
-                    if clibrationCorner == 3:
-                        print topLeft, bottomRight
-                        #print SCREEN_HEIGHT,SCREEN_WIDTH
-                        calibrationMode = False
-                        centerCalc[0] = (np.double(topLeft[0]) - np.double(bottomRight[0]))/2
-                        centerCalc[1] = (np.double(topLeft[1]) - np.double(bottomRight[1]))/2
-                        ew = np.double(bottomRight[0]) - np.double(topLeft[0])
-                        eh = np.double(topLeft[1]) - np.double(bottomRight[1])
-                        MOUSE_SCALE_X = SCREEN_WIDTH/ew
-                        MOUSE_SCALE_Y = SCREEN_HEIGHT/eh
-                        #MOUSE_SCALE_X = 20
-                        #MOUSE_SCALE_Y = 30
-                        clibrationCorner = 11
-                        print 'this is calibration',centerCalc, ew, eh
+                        if ((fx+ex+center[0]) - defaultCenter[0]) > MOUSE_THRESH:
+                            mouseAccel[0] = 2
+                        elif ((fx+ex+center[0]) - defaultCenter[0]) < -1*MOUSE_THRESH:
+                            mouseAccel[0] = -2
 
-                    if calibrationMode == False:
-                        if not (center is None):
-                            diff = [0, 0]
-                            tempCenterX = np.double(center[0])-np.double(topLeft[0])
-                            tempCenterY = np.double(center[1])-np.double(topLeft[1])
+                        #if ((fy+ey+center[1]) - defaultCenter[1]) > MOUSE_THRESH:
+                        if ((fy + ey + center[1]) - defaultCenter[1]) > MOUSE_THRESH:
+                            mouseAccel[1] = 2
+                        elif ((fy+ey+center[1]) - defaultCenter[1]) < -1*MOUSE_THRESH:
+                            mouseAccel[1] = -2
 
-                            diff[0] = (tempCenterX-np.double(centerCalc[0])) * np.double(MOUSE_SCALE_X)
-                            diff[1] = (tempCenterY-np.double(centerCalc[1])) * np.double(MOUSE_SCALE_Y)
-                            #print np.double(centerCalc[0]) - np.double(center[0])
-                            ##print np.double(centerCalc[1]) - np.double(center[1])
-                            #print (np.double(centerCalc[0]) - np.double(center[0])) * MOUSE_SCALE_X
-                            #print (np.double(centerCalc[1]) - np.double(center[1])) * MOUSE_SCALE_Y
-                            #print (np.double(center[0]) - np.double(centerCalc[0]))
-                            #print (np.double(center[1]) - np.double(centerCalc[1]))
-                            print (centerCalc[0]-tempCenterX)
-                            print (centerCalc[1]-tempCenterY)
-                            print tempCenterX,tempCenterY, centerCalc[0], centerCalc[1], diff[0], diff[1]
+                        #diff = [0, 0]
+                        #tempCenterX = np.double(center[0])-np.double(topLeft[0])
+                        #tempCenterY = np.double(center[1])-np.double(topLeft[1])
 
-                            # print 'Diff: ', diff
-                            mousePoint[0] = long(diff[0])
-                            mousePoint[1] = long(diff[1])
-                            # move the mouse the difference
-                            '''mousePoint[0] += diff[0]
-                            mousePoint[1] += diff[1]
-                            if( mousePoint[0] > SCREEN_WIDTH ):
-                                mousePoint[0] = SCREEN_WIDTH
-                            elif( mousePoint[0] < 0):
-                                mousePoint[0] = 0
-                            if (mousePoint[1] > SCREEN_HEIGHT):
-                                mousePoint[1] = SCREEN_HEIGHT
-                            elif (mousePoint[1] < 0):
-                                mousePoint[1] = 0
-                            '''
+                        #diff[0] = (tempCenterX-np.double(centerCalc[0])) * np.double(MOUSE_SCALE_X)
+                        #diff[1] = (tempCenterY-np.double(centerCalc[1])) * np.double(MOUSE_SCALE_Y)
+                        #print np.double(centerCalc[0]) - np.double(center[0])
+                        ##print np.double(centerCalc[1]) - np.double(center[1])
+                        #print (np.double(centerCalc[0]) - np.double(center[0])) * MOUSE_SCALE_X
+                        #print (np.double(centerCalc[1]) - np.double(center[1])) * MOUSE_SCALE_Y
+                        #print (np.double(center[0]) - np.double(centerCalc[0]))
+                        #print (np.double(center[1]) - np.double(centerCalc[1]))
+                        #print (centerCalc[0]-tempCenterX)
+                        #print (centerCalc[1]-tempCenterY)
+                        #print tempCenterX,tempCenterY, centerCalc[0], centerCalc[1], diff[0], diff[1]
 
-                            # append to the list of mouse points
-                            #mousePoints.append((SCREEN_WIDTH * center[0] / ew, SCREEN_HEIGHT * center[1] / eh))
-
-                            # average the last 5 mouse points
-                            #mousePoint = stabilize(mousePoints, 5)
-                            # print mousePoint, mousePoints
-                            # ratio: center_x / eye_width = mouse_x / screen_width
-                            # mousePoint[0] = SCREEN_WIDTH * center[0] / ew
-                            # ratio: center_y / eye_height = mouse_y / screen_height
-                            # mousePoint[1] = SCREEN_HEIGHT * center[1] / eh
-                            # print 'Mousepoint: ', mousePoint
-                            win32api.SetCursorPos((mousePoint[0], mousePoint[1]))
-
-                            lastPoint = center
-                            cv2.rectangle(frame, (int(fx + ex + topLeft[0]), int(fy + ey + bottomRight[1])), (int(fx + ex + ew), int(fy + ey + eh)), (0, 255, 0), 2)
+                        # print 'Diff: ', diff
+                        #mousePoint[0] = long(diff[0])
+                        #mousePoint[1] = long(diff[1])
+                        # move the mouse the difference
+                        #mousePoint[0] += diff[0]
+                        #mousePoint[1] += diff[1]
 
 
+                        # append to the list of mouse points
+                        #mousePoints.append((SCREEN_WIDTH * center[0] / ew, SCREEN_HEIGHT * center[1] / eh))
 
+                        # average the last 5 mouse points
+                        #mousePoint = stabilize(mousePoints, 5)
+                        # print mousePoint, mousePoints
+                        # ratio: center_x / eye_width = mouse_x / screen_width
+                        # mousePoint[0] = SCREEN_WIDTH * center[0] / ew
+                        # ratio: center_y / eye_height = mouse_y / screen_height
+                        # mousePoint[1] = SCREEN_HEIGHT * center[1] / eh
+                        # print 'Mousepoint: ', mousePoint
 
-                            # draw the eyeball circle
-                            # if not (eyeball is None):
-                            # cv2.circle(frame, (fx + ex + eyeball[0], fy + ey + eyeball[1]), eyeball[2], (0,0,255), 2)
-                            # cv2.circle(frame, (fx+ex+center[0],fy+ey+center[1]), eyeball[2], (0,0,255), 2)
+                        lastPoint = center
+                        cv2.rectangle(frame, (int(fx + ex + topLeft[0]), int(fy + ey + bottomRight[1])), (int(fx + ex + ew), int(fy + ey + eh)), (0, 255, 0), 2)
+
+                    # draw the eyeball circle
+                    # if not (eyeball is None):
+                    # cv2.circle(frame, (fx + ex + eyeball[0], fy + ey + eyeball[1]), eyeball[2], (0,0,255), 2)
+                    # cv2.circle(frame, (fx+ex+center[0],fy+ey+center[1]), eyeball[2], (0,0,255), 2)
                     # cv2.circle(frame, (fx + ex + center[0], fy + ey + center[1]), 10, (0, 0, 255), 2)
                     cv2.circle(frame, (fx + ex + center[0], fy + ey + center[1]), 2, (0, 0, 255), 2)
+
+                clip = eye_cropped
+
+        mouseVel[0] += mouseAccel[0]
+        mouseVel[1] += mouseAccel[1]
+        mousePoint[0] += mouseVel[0]
+        mousePoint[1] += mouseVel[1]
+
+        if (mouseVel[0] > 8):
+            mouseVel[0] = 8
+        elif (mouseVel[0] < -8):
+            mouseVel[0] = -8
+        if (mouseVel[1] > 8):
+            mouseVel[1] = 8
+        elif (mouseVel[1] < -8):
+            mouseVel[1] = -5
+
+        # slow down the mouse if not being accelerated
+        if mouseAccel[0] == 0 and abs(mouseVel[0]) > 0:
+            if mouseVel[0] > 0:
+                mouseVel[0] -= 1
+            else:
+                mouseVel[0] += 1
+
+        if mouseAccel[1] == 0 and abs(mouseVel[1]) > 0:
+            if mouseVel[1] > 0:
+                mouseVel[1] -= 1
+            else:
+                mouseVel[1] += 1
+
+        if (mousePoint[0] > SCREEN_WIDTH):
+            mousePoint[0] = SCREEN_WIDTH
+        elif (mousePoint[0] < 0):
+            mousePoint[0] = 0
+        if (mousePoint[1] > SCREEN_HEIGHT):
+            mousePoint[1] = SCREEN_HEIGHT
+        elif (mousePoint[1] < 0):
+            mousePoint[1] = 0
+
+        win32api.SetCursorPos((mousePoint[0], mousePoint[1]))
 
 
                     # set the current center as the last point
                     # lastPoint = center
 
                     # testing eye clipping
-                    clip = eye_cropped
+
 
                     # checking cropped image
                     # clip = face_cropped
@@ -422,11 +439,11 @@ while True:
     # show the frame
     cv2.imshow('frame', frame)
     # show the blurred version of the frame
-    frame = cv2.medianBlur(frame, 5)
-    cv2.imshow('frame blurred', frame)
+    #frame = cv2.medianBlur(frame, 5)
+    #cv2.imshow('frame blurred', frame)
     # test what cv2.histogram looks like
-    if len(clip.shape) == 2:
-        cv2.equalizeHist(clip, clip)
+    #if len(clip.shape) == 2:
+    #    cv2.equalizeHist(clip, clip)
 
     cv2.imshow('clipped', clip)
 

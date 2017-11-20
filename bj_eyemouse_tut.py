@@ -2,9 +2,17 @@
 import numpy as np
 import cv2
 import sys
+import win32api
 
-#This code attempts to average out the last 5 pupil data and use it
-#
+# constants
+# SCREEN_WIDTH  = 1920
+# SCREEN_HEIGHT = 1080
+SCREEN_WIDTH = win32api.GetSystemMetrics(0)
+SCREEN_HEIGHT = win32api.GetSystemMetrics(1)
+
+MOUSE_SCALE_X = 20
+MOUSE_SCALE_Y = -30
+
 # load the webcam
 cam = cv2.VideoCapture(0)
 
@@ -12,58 +20,50 @@ cam = cv2.VideoCapture(0)
 faceCascade = cv2.CascadeClassifier('C:\opencv\data\haarcascades\haarcascade_frontalface_alt.xml')
 eyeCascade  = cv2.CascadeClassifier('C:\opencv\data\haarcascades\haarcascade_eye_tree_eyeglasses.xml')
 
+# holds the previous center
+lastPoint = [0,0]
+
+# holds the location of the mouse
+mousePoint = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2]
+
 def getLeftEye(eyes):
     i = 0
     leftMost = 99999999
     leftMostIndex = -1
-    #print(eyes)
-    #print(eyes[0][0])
-    #print(eyes[0][1])
-    #print(eyes[1][0])
 
     while True:
         if i > len(eyes) - 1:
             break
-
         if (eyes[i][0] < leftMost):
             leftMost = eyes[i][0]
             leftMostIndex = i
+
         i = i + 1
     # print(leftMostIndex)
+    if not (eyes is None):
+        if len(np.asarray(eyes).shape) != 1:
+            return eyes[leftMostIndex]
+        else:
+            return eyes
+    else:
+        return None
 
-    if len(np.asarray(eyes).shape) != 1:
-        #print("Eye chose", eyes[leftMostIndex])
-        #print("Index", leftMostIndex)
-        return eyes[leftMostIndex]
 
-
-def getAverageCircle(circles):
+def getLeftCircle(Circles):
     i = 0
-    tempX = 0
-    tempY = 0
-    tempRadius = 0
-    print("orig coords" , circles)
-    while True:
-        if i > len(circles) - 1:
-            break
+    leftMost = 99999999
+    leftMostIndex = -1
 
-        tempX = tempX+circles[0][i][0]
-        tempY = tempY+circles[0][i][1]
-        tempRadius = tempRadius+circles[0][i][2]
+    while True:
+        if i >= len(circles) - 1:
+            break
+        if (circles[0][0][0] < leftMost):
+            leftMost = eyes[0][0][0]
+            leftMostIndex = i
 
         i = i + 1
     # print(leftMostIndex)
-    print("before", tempX, tempY, tempRadius)
-    tempX = tempX/(len(circles))
-    tempY = tempY/(len(circles))
-    tempRadius = tempRadius/(len(circles)+1)
-    print("after", tempX, tempY, tempRadius)
-
-    pupil = [tempX,tempY,tempRadius]
-
-    print("Pupil before return", pupil)
-
-    return  pupil
+    return circles[leftMostIndex]
 
 # function to figure out the location of eyes
 def detectFaces(frame, faceCascade):
@@ -90,9 +90,8 @@ def detectEyes(frame, eyeCascade):
     # cv2.equalizeHist(grayscale, grayscale)
     # get a list of eyes (in rect form)
     #eyes = eyeCascade.detectMultiScale(grayscale, 1.1, 2)
-
     eyes = eyeCascade.detectMultiScale(grayscale)
-    eyes = getLeftEye(eyes)
+
     return eyes
 
 def detectIrises(frame):
@@ -136,9 +135,6 @@ def detectIrises(frame):
                               1,minDist,param1=param1,param2=param2,
                               minRadius=minRadius,maxRadius=maxRadius)
 
-    if not (irises is None):
-        irises = getAverageCircle(irises)
-
     return irises
 
 # what if instead of using houghcircles, we just
@@ -147,9 +143,62 @@ def detectIrises(frame):
 # left, right, up, down, etc.
 #def getCenters(eyes):
 
+# looks for the blackest circle
+def getEyeBall(frame, circles):
+    # stores the total pixel sum values for each circle
+    sums = np.zeros(len(circles))
+
+    #print frame
+    #print circles
+
+    # loop through the frame's rows
+    for y in range(frame.shape[0]):
+        # loop through that row (length of the row):
+        for x in range(frame.shape[1]):
+            # loop through each circle
+            for i in range(len(circles)):
+                # get the center point of the circle
+                center = (int(circles[0][i][0]), int(circles[0][i][1]))
+                radius = int(circles[0][i][2])
+
+                # checks if the pixel is inside the circle, and
+                # if so adds it to the total circle values
+                if(pow(x - center[0], 2) + pow(y - center[1], 2) < pow(radius, 2)):
+                    sums[i] += frame[y][x]
+
+    # figure out the smallest sum
+    smallestSum   = 9999999
+    smallestIndex = -1
+    for i in range(len(circles)):
+        if sums[i] < smallestSum:
+            smallestIndex = i
+
+    return circles[0][smallestIndex]
+
+
+# get the last average X amount of circle locations
+# points is the list of circle points, amount
+# is the number of points to average
+def stabilize(points, amount):
+    sumX = 0
+    sumY = 0
+    count = 0
+    for i in xrange(max(0, len(points)-amount), len(points)):
+        sumX += points[i][0] # x
+        sumY += points[i][1] # y
+        count += 1
+    if count > 0:
+        sumX /= count
+        sumY /= count
+
+    return (sumX, sumY)
+
 
 # empty image placeholder
 clip = np.zeros((512,512,3), np.uint8)
+
+# holds the past centers of the eyeball, to use for averaging
+centers = []
 
 while True:
     ret, frame = cam.read()
@@ -183,14 +232,26 @@ while True:
 
         # draw squares around the eyes
         if not (eyes is None):
-            #for eye in eyes:
-                ex = eyes[0]
-                ey = eyes[1]
-                ew = eyes[2]
-                eh = eyes[3]
+
+            # test getting left eye
+            eyes = np.asarray(getLeftEye(eyes))
+            #print eyes
+
+            if (not (eyes is None)) and not len(eyes) == 0:
+                eye = eyes
+                #for eye in eyes:
+                #for ex, ey, ew, eh in eyes:
+                ex = eye[0]
+                ey = eye[1]
+                ew = eye[2]
+                eh = eye[3]
                 #cv2.rectangle(face_cropped, (ex,ey), (ex+ew,ey+eh),(0,255,0),2)
+
                 # draw a rectangle around the found eye
                 cv2.rectangle(frame, (fx+ex,fy+ey), (fx+ex+ew,fy+ey+eh),(0,255,0),2)
+
+                #print('Eye frame: X: ' + str(ex) + ',' + str(ex+ew))
+                #print('Eye frame: Y: ' + str(ey) + ',' + str(ey+eh))
 
                 # calculate the middle half of the detected eye square (to
                 # focus on just the eye more)
@@ -209,67 +270,74 @@ while True:
 
                 # go through each iris
                 if not (irises is None):
-                        irises = np.uint16(np.around(irises))
-                    #for iris in irises[0,:]:
-                        print(irises)
-                        ix = irises[0]
-                        iy = irises[1]
-                        ir = irises[2]
+                    irises = np.uint16(np.around(irises))
+                    '''for iris in irises[0,:]:
+                        ix = iris[0]
+                        iy = iris[1]
+                        ir = iris[2]
 
                         #cv2.circle(frame, (int(fx+cex+ix),int(fy+cey+iy)), ir, (0,0,255), 2)
                         #cv2.circle(frame, (fx + cex + ix, fy + cey + iy), ir, (0, 0, 255), 2)
-                        cv2.circle(frame, (fx + ex + ix, fy + ey + iy), ir, (0, 0, 255), 2)
+                        cv2.circle(frame, (fx + ex + ix, fy + ey + iy), ir, (0, 0, 255), 2)'''
+
+                    # get the one that is the darkest and call
+                    # it the eyeball
+                    eyeball = getEyeBall(eye_cropped, irises)
+                    #print 'eye cropped shape: ', eye_cropped.shape
+                    #print eyeball
+
+                    # add the current center to the list of centers
+                    centers.append((eyeball[0], eyeball[1]))
+
+                    # calculate the new average center
+                    center = stabilize(centers, 5) # use the past 5 entries
+
+                    # calculate the new mouse position
+                    if not (center is None):
+                        diff = [0,0]
+                        diff[0] = (center[0] - lastPoint[0]) * MOUSE_SCALE_X
+                        diff[1] = (center[1] - lastPoint[1]) * MOUSE_SCALE_Y
+
+                        print('Center: ', center)
+
+                        #print 'Diff: ', diff
+
+                        # move the mouse the difference
+                        '''mousePoint[0] += diff[0]
+                        mousePoint[1] += diff[1]
+                        if( mousePoint[0] > SCREEN_WIDTH ):
+                            mousePoint[0] = SCREEN_WIDTH
+                        elif( mousePoint[0] < 0):
+                            mousePoint[0] = 0
+                        if (mousePoint[1] > SCREEN_HEIGHT):
+                            mousePoint[1] = SCREEN_HEIGHT
+                        elif (mousePoint[1] < 0):
+                            mousePoint[1] = 0
+                        '''
+                        # ratio: center_x / eye_width = mouse_x / screen_width
+                        mousePoint[0] = SCREEN_WIDTH * center[0] / ew
+                        # ratio: center_y / eye_height = mouse_y / screen_height
+                        mousePoint[1] = SCREEN_HEIGHT * center[1] / eh
+                        #print 'Mousepoint: ', mousePoint
+                        win32api.SetCursorPos((mousePoint[0],mousePoint[1]))
+
+                        lastPoint = center
+
+                    # draw the eyeball circle
+                    #if not (eyeball is None):
+                        #cv2.circle(frame, (fx + ex + eyeball[0], fy + ey + eyeball[1]), eyeball[2], (0,0,255), 2)
+                        #cv2.circle(frame, (fx+ex+center[0],fy+ey+center[1]), eyeball[2], (0,0,255), 2)
+                    #    cv2.circle(frame, (fx + ex + center[0], fy + ey + center[1]), 10, (0, 0, 255), 2)
+                    cv2.circle(frame, (fx + ex + center[0], fy + ey + center[1]), 10, (0, 0, 255), 2)
+
+                    # set the current center as the last point
+                    #lastPoint = center
 
                 # testing eye clipping
                 clip = eye_cropped
 
         # checking cropped image
         #clip = face_cropped
-
-
-
-    '''eyes = detectEyes(frame, eyeCascade)
-    # iterate through each eye if they exist
-    if not (eyes is None):
-        for eye in eyes:
-            # get the eye rect x,y,w,h
-            ex = eye[0]
-            ey = eye[1]
-            ew = eye[2]
-            eh = eye[3]
-
-            # draw a rect around the eye
-            cv2.rectangle(frame, (ex, ey), (ew, eh), (0, 0, 255), 2)
-            # cv2.rectangle(clip, (ex, ey), (ew, eh), (0, 0, 255), 2)
-
-
-    for circle in circles[0,:]:
-        # draw the outer circle
-        cv2.circle(frame, (circle[0],circle[1]),circle[2],(0,255,0),2)
-
-    # go through each detected eye
-    for x,y,w,h in eyes:
-        # draw a rectangle around the eye
-        cv2.rectangle(frame, (x,y),(x+w,y+h),(0,255,0),2)
-
-        # cut out the eye section
-        roi_color = frame[y:y+h, x:x+w]
-        roi_gray  = cv2.cvtColor(roi_color, cv2.COLOR_BGR2GRAY)
-
-        # detect circles within the eye
-        circles = cv2.HoughCircles(roi_gray, cv2.HOUGH_GRADIENT,
-                                   1,20,param1=50,param2=30,
-                                   minRadius=0,maxRadius=0)
-        # get the x y and radius of each detected circle
-        if not (circles is None):
-            for circle in circles:
-                ex = int(circle[0][0])
-                ey = int(circle[0][1])
-                er = int(circle[0][2])
-                cv2.circle(frame, (x+ex,y+ey), er, (255,0,0), 2)
-                #print 'circle: ', circle
-    '''
-
 
 
     # show the frame

@@ -14,6 +14,8 @@ calibrationMode = True
 clibrationCorner = 1
 readInput = False
 topLeft = [0,0]
+topRight = [0,0]
+bottomLeft = [0,0]
 bottomRight = [0,0]
 centerCalc = [0,0]
 center = []
@@ -209,7 +211,10 @@ def stabilize(points, amount):
 clip = np.zeros((512,512,3), np.uint8)
 
 # holds the past centers of the eyeball, to use for averaging
-centers = []
+#centers = []
+
+# hold previous mouse points
+mousePoints = []
 
 while True:
     ret, frame = cam.read()
@@ -302,11 +307,12 @@ while True:
                     #print 'eye cropped shape: ', eye_cropped.shape
                     #print eyeball
                     # add the current center to the list of centers
-                    centers.append((eyeball[0], eyeball[1]))
+                    #centers.append((eyeball[0], eyeball[1]))
                     # calculate the new average center
-                    center = stabilize(centers, 5) # use the past 5 entries
-
-
+                    #center = stabilize(centers, 5) # use the past 5 entries
+                    center = (eyeball[0], eyeball[1])
+                    
+                    
                     # calculate the new mouse position
                     if(cv2.waitKey(1) & 0xFF == ord(' ')):
                         readInput = True
@@ -317,23 +323,33 @@ while True:
                         topLeft = center
                         clibrationCorner = 2
                         readInput = False
-                        print "Look at the bottom right corner and press the space bar"
+                        print "Look at the top right corner and press the space bar"
 
                     if(readInput == True and clibrationCorner == 2):
-                        bottomRight = center
+                        topRight = center
                         clibrationCorner = 3
                         readInput = False
+                        print "Look at the bottom left corner and press the space bar"
 
-                    if clibrationCorner == 3:
-                        print topLeft,bottomRight
+                    if(readInput == True and clibrationCorner == 3):
+                        bottomLeft = center
+                        clibrationCorner = 4
+                        readInput = False
+                        print "Look at the bottom right corner and press the space bar"
+
+                    if(readInput == True and clibrationCorner == 4):
+                        bottomRight = center
+                        clibrationCorner = 10
+                        readInput = False
+
+                    if clibrationCorner == 10:
+                        print topLeft,topRight,bottomLeft,bottomRight
                         calibrationMode = False
-                        centerCalc[0] = (topLeft[0]-bottomRight[0])/2
-                        centerCalc[1] = (topLeft[1]-bottomRight[1])/2
-                        ew = topLeft[0]-bottomRight[0]
-                        eh = topLeft[1]-bottomRight[1]
+                        centerCalc[0] = (topRight[0] - topLeft[0])/2
+                        centerCalc[1] = (bottomLeft[1] - topLeft[1])/2
+                        ew = topRight[0]-topLeft[0]
+                        eh = topLeft[1]-bottomLeft[1]
                         clibrationCorner = 11
-
-                        print centerCalc, ew, eh
 
                     if calibrationMode == False:
                         if not (center is None):
@@ -342,7 +358,7 @@ while True:
                             #diff[1] = (center[1] - lastPoint[1]) * MOUSE_SCALE_Y
                             diff[0] = (center[0] - centerCalc[0])*MOUSE_SCALE_X
                             diff[1] = (center[1] - centerCalc[1])*MOUSE_SCALE_Y
-                            print center,centerCalc,diff[0],diff[1]
+                            print('Center: ', center)
 
                             #print 'Diff: ', diff
 
@@ -358,14 +374,23 @@ while True:
                             elif (mousePoint[1] < 0):
                                 mousePoint[1] = 0
                             '''
+                            
+                            # append to the list of mouse points
+                            mousePoints.append((SCREEN_WIDTH * center[0] / ew, SCREEN_HEIGHT * center[1] / eh))
+                            
+                            # average the last 5 mouse points
+                            mousePoint = stabilize(mousePoints, 5)
+                            
                             # ratio: center_x / eye_width = mouse_x / screen_width
-                            mousePoint[0] = SCREEN_WIDTH * center[0] / ew
+                            #mousePoint[0] = SCREEN_WIDTH * center[0] / ew
                             # ratio: center_y / eye_height = mouse_y / screen_height
-                            mousePoint[1] = SCREEN_HEIGHT * center[1] / eh
+                            #mousePoint[1] = SCREEN_HEIGHT * center[1] / eh
                             #print 'Mousepoint: ', mousePoint
                             win32api.SetCursorPos((mousePoint[0],mousePoint[1]))
 
                             lastPoint = center
+                            
+                            
 
                     # draw the eyeball circle
                     #if not (eyeball is None):
